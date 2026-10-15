@@ -1,36 +1,109 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Task Manager
 
-## Getting Started
+Next.js application with a Coliconstruct task workspace, Better Auth, email/password authentication, optional Google sign-in, and PostgreSQL sessions.
 
-First, run the development server:
+## Public home page and workspace preview
 
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+Run `pnpm dev` and open http://localhost:3000. The public product page introduces the task manager with the company logo, white and blue theme, interactive product views, feature explanations, workflow, FAQs, and links to the preview and team sign-in. It works before database setup. Public account access and launch details are presented as upcoming; there are no fabricated customer claims, pricing, or contact forms.
+
+The full interactive workspace is available at http://localhost:3000/preview. The authenticated workspace remains at `/dashboard`.
+
+The public page has a blue-tinted sticky navigation bar that keeps its color while shrinking after scrolling, plus a moon/sun theme toggle. The selected light or dark theme is remembered in browser local storage. Theme colors are scoped to the public page.
+
+The preview includes board, table, and monthly calendar views; task creation and editing; status changes by dropdown or drag; search and filters; and a daily report of tasks scheduled per user. Sample tasks and team members are illustrative. Edits are saved only in browser local storage and are separate from authenticated company records. Daily reports show the current status of scheduled tasks; historical activity reporting will require the database workflow.
+
+## Local configuration
+
+Node 24 and pnpm are used by this project. A git-ignored `.env` has been prepared locally with generated authentication and local database secrets. `.env.example` documents the variables without secrets.
+
+If setting up another checkout, copy `.env.example` to `.env`, then generate independent secrets:
+
+```powershell
+node -e 'console.log(require("node:crypto").randomBytes(32).toString("base64"))'
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Set `BETTER_AUTH_SECRET` to the generated value. Keep `BETTER_AUTH_URL=http://localhost:3000` for development.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## PostgreSQL
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+The selected setup is hosted PostgreSQL using Neon. No local PostgreSQL server or Docker installation is needed. `DATABASE_URL` is currently blank; authentication cannot create accounts or sessions until it is configured.
 
-## Learn More
+### Hosted PostgreSQL with Neon
 
-To learn more about Next.js, take a look at the following resources:
+1. Sign in at https://console.neon.tech/ and create a project named `taskmanager`.
+2. Choose an available region near your users. Use a dedicated development database for this setup.
+3. Open **Connect**, select the database and role, and enable **Connection pooling**.
+4. Copy the PostgreSQL connection string into the existing `DATABASE_URL=` line in `.env`. Preserve its TLS parameters. Do not put the URL in a `NEXT_PUBLIC_` variable or commit it.
+5. Keep the existing generated `BETTER_AUTH_SECRET` and `BETTER_AUTH_URL=http://localhost:3000`.
+6. Run the authentication table commands below, then restart the app.
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+The pooled hostname includes `-pooler`. The existing `pg` driver connects directly to Neon; no Neon SDK or separate hosted authentication service is required. Keep certificate verification enabled.
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+Reference: https://neon.com/docs/get-started-with-neon/connect-neon
 
-## Deploy on Vercel
+### Optional alternative: local PostgreSQL with Docker Desktop
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+Docker Desktop must be installed and running. The included Compose configuration binds PostgreSQL to localhost port 5433 and stores data in a persistent volume.
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+1. Set `POSTGRES_PASSWORD` in `.env` (already generated in this checkout).
+2. Set `DATABASE_URL=postgresql://taskmanager:YOUR_POSTGRES_PASSWORD@localhost:5433/taskmanager`, substituting the same password. URL-encode reserved characters if you choose your own password.
+3. Start PostgreSQL:
+
+```powershell
+pnpm db:up
+```
+
+`pnpm db:stop` stops the database while preserving its data. Changing `POSTGRES_PASSWORD` later does not change an existing database user's password.
+
+### Create authentication tables
+
+```powershell
+pnpm auth:check
+pnpm auth:migrate
+pnpm dev
+```
+
+`auth:check` previews required schema changes. `auth:migrate` applies Better Auth's migrations, including the database-backed rate-limit table. Review the preview before applying to an existing database.
+
+Visit http://localhost:3000/sign-up to create an account.
+
+## Google sign-in
+
+1. Open https://console.cloud.google.com/ and select or create a project.
+2. Configure the Google Auth Platform branding, audience, and OAuth consent screen. Add test users if the application is in testing mode.
+3. Create an OAuth client ID with application type **Web application**.
+4. Add authorized JavaScript origin `http://localhost:3000`.
+5. Add this exact authorized redirect URI: `http://localhost:3000/api/auth/callback/google`.
+6. Put the client ID and secret in `.env` as `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET`.
+7. Restart the app. For a production build, rebuild after changing provider configuration.
+
+Both Google variables must be set before the Google button is enabled. The client secret remains on the server. PostgreSQL is also required for Google sign-in.
+
+For deployment, set `BETTER_AUTH_URL` to the public HTTPS origin and register its `/api/auth/callback/google` redirect URI with Google.
+
+Reference: https://better-auth.com/docs/authentication/google
+
+## Current authentication behavior
+
+- `/sign-in` and `/sign-up`: email/password forms and Google sign-in.
+- `/dashboard`: server-validated session required; anonymous users go to sign-in.
+- `/`: public product presentation page.
+- `/preview`: browser-local sample workspace, separate from the authenticated dashboard.
+- `/api/auth/*`: Better Auth endpoints; return 503 until environment configuration is present.
+- Passwords require 12-128 characters; Better Auth hashes them.
+- Sessions expire after seven days and refresh after one day of activity.
+- Rate limits persist in PostgreSQL, including five email login attempts per minute.
+- Signup is public. Roles, invitations, email verification, and password reset emails are not implemented yet.
+- Automatic account linking is disabled until email verification is implemented. Use the original login method for an existing email address; choosing another method does not automatically merge accounts.
+- Call `requireSession()` inside future protected pages, server actions, and data access functions. Future API endpoints must validate sessions and enforce task/user permissions separately. Hiding UI is not authorization.
+- Session data is not placed in a shared application cache.
+
+## Validation
+
+```powershell
+pnpm lint
+pnpm exec tsc --noEmit
+pnpm build
+```
+
+After connecting PostgreSQL, verify account creation, invalid-password rejection, sign-out, session persistence after refresh, and blocked access to `/dashboard` after sign-out. Google sign-in additionally requires real OAuth credentials and browser consent.
