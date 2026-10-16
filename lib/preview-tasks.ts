@@ -178,7 +178,7 @@ export function parseTasks(raw: string | null): Task[] {
           ].every((key) => typeof task[key] === "string") &&
           STATUSES.includes(task.status) &&
           ["High", "Medium", "Low"].includes(task.priority) &&
-          TEAM.some((member) => member.id === task.assignee) &&
+          task.assignee.trim().length > 0 &&
           /^\d{4}-\d{2}-\d{2}$/.test(task.date),
       )
     )
@@ -211,16 +211,17 @@ export function displayDate(date: string, today: string) {
   }).format(new Date(date + "T12:00:00"));
 }
 
-export function calendarDays(month: string) {
+export function calendarDays(month: string, mondayFirst = false) {
   const current = new Date(month + "T12:00:00");
   const first = new Date(current.getFullYear(), current.getMonth(), 1, 12);
   const last = new Date(current.getFullYear(), current.getMonth() + 1, 0, 12);
-  const total = Math.ceil((first.getDay() + last.getDate()) / 7) * 7;
+  const offset = (first.getDay() + (mondayFirst ? 6 : 0)) % 7;
+  const total = Math.ceil((offset + last.getDate()) / 7) * 7;
   return Array.from({ length: total }, (_, index) => {
     const date = new Date(
       first.getFullYear(),
       first.getMonth(),
-      index - first.getDay() + 1,
+      index - offset + 1,
       12,
     );
     const iso = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;

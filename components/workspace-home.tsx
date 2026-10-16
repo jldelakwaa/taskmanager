@@ -2,6 +2,17 @@
 
 import Image from "next/image";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
+import { WorkspaceDataProvider, useWorkspaceData } from "./workspace-data";
+import { useMarketingTheme } from "./marketing-theme";
+import { SignOutButton } from "./sign-out-button";
+import {
+  WORKSPACE_ROUTES,
+  type WorkspaceSection,
+} from "@/lib/workspace-navigation";
+import type { WorkspaceAccess } from "@/lib/workspace-access";
+import { localId } from "@/lib/local-id";
+import "@/app/workspace.css";
 import {
   useEffect,
   useMemo,
@@ -9,6 +20,7 @@ import {
   useState,
   useSyncExternalStore,
   type FormEvent,
+  type ReactNode,
 } from "react";
 import {
   ArrowDown,
@@ -38,6 +50,10 @@ import {
   Users,
   X,
   FileChartColumn,
+  Settings2,
+  ShieldCheck,
+  Moon,
+  Sun,
   type LucideIcon,
 } from "lucide-react";
 import {
@@ -49,18 +65,20 @@ import {
   statusClass,
   storeTasks,
   subscribeToTasks,
-  TEAM,
   type Status,
   type Task,
 } from "@/lib/preview-tasks";
 
-type Page = "overview" | "tasks" | "calendar" | "reports";
+type Page = WorkspaceSection;
 type View = "board" | "table" | "calendar";
 const navItems: { id: Page; label: string; icon: LucideIcon }[] = [
   { id: "overview", label: "Overview", icon: LayoutDashboard },
   { id: "tasks", label: "All tasks", icon: ListTodo },
   { id: "calendar", label: "Calendar", icon: CalendarDays },
   { id: "reports", label: "Daily report", icon: FileChartColumn },
+  { id: "team", label: "Team", icon: Users },
+  { id: "settings", label: "Preferences", icon: Settings2 },
+  { id: "admin", label: "Administration", icon: ShieldCheck },
 ];
 const STATUS_ICONS = {
   "To do": Circle,
@@ -70,7 +88,14 @@ const STATUS_ICONS = {
 };
 
 function Avatar({ id, small = false }: { id: string; small?: boolean }) {
-  const person = TEAM.find((member) => member.id === id) ?? TEAM[0];
+  const {
+    directory: { members },
+  } = useWorkspaceData();
+  const person = members.find((member) => member.id === id) ?? {
+    name: "Unassigned",
+    initials: "?",
+    color: "blue",
+  };
   return (
     <span
       className={`avatar avatar-${person.color}${small ? " avatar-small" : ""}`}
@@ -90,15 +115,41 @@ function StatusBadge({ status }: { status: Status }) {
   );
 }
 
-export function WorkspaceHome({ today }: { today: string }) {
+type WorkspaceProps = {
+  today: string;
+  initialPage?: Page;
+  routed?: boolean;
+  access?: WorkspaceAccess;
+  children?: ReactNode;
+};
+export function WorkspaceHome(props: WorkspaceProps) {
+  return (
+    <WorkspaceDataProvider>
+      <WorkspaceContent {...props} />
+    </WorkspaceDataProvider>
+  );
+}
+function WorkspaceContent({
+  today,
+  initialPage = "overview",
+  routed = false,
+  access,
+  children,
+}: WorkspaceProps) {
+  const { directory } = useWorkspaceData();
+  const members = directory.members;
+  const router = useRouter();
+  const { theme, setTheme } = useMarketingTheme();
   const raw = useSyncExternalStore(
     subscribeToTasks,
     readStoredTasks,
     () => null,
   );
   const tasks = useMemo(() => parseTasks(raw), [raw]);
-  const [page, setPage] = useState<Page>("overview");
-  const [view, setView] = useState<View>("board");
+  const [page, setPage] = useState<Page>(initialPage);
+  const [view, setView] = useState<View>(
+    initialPage === "calendar" ? "calendar" : "board",
+  );
   const [query, setQuery] = useState("");
   const [assignee, setAssignee] = useState("all");
   const [status, setStatus] = useState("all");
@@ -111,6 +162,14 @@ export function WorkspaceHome({ today }: { today: string }) {
   const [dropTarget, setDropTarget] = useState<Status | null>(null);
   const searchRef = useRef<HTMLInputElement>(null);
   const pageTitle = navItems.find((item) => item.id === page)!.label;
+  const isTaskPage = ["overview", "tasks", "calendar", "reports"].includes(
+    page,
+  );
+  const visibleNav = navItems.filter((item) =>
+    routed
+      ? item.id !== "admin" || access?.isAdmin
+      : ["overview", "tasks", "calendar", "reports"].includes(item.id),
+  );
   const filtered = tasks.filter(
     (task) =>
       (assignee === "all" || task.assignee === assignee) &&
@@ -144,6 +203,11 @@ export function WorkspaceHome({ today }: { today: string }) {
   }, []);
 
   function navigate(next: Page) {
+    if (routed) {
+      router.push(WORKSPACE_ROUTES[next]);
+      setSidebarOpen(false);
+      return;
+    }
     setPage(next);
     setSidebarOpen(false);
     if (next === "calendar") setView("calendar");
@@ -185,7 +249,7 @@ export function WorkspaceHome({ today }: { today: string }) {
   }
 
   return (
-    <div className="workspace-app">
+    <div className="workspace-app" data-theme={theme}>
       {sidebarOpen && (
         <button
           className="sidebar-scrim"
@@ -211,14 +275,14 @@ export function WorkspaceHome({ today }: { today: string }) {
             <LayoutGrid size={19} />
           </div>
           <div>
-            <strong>Task Manager</strong>
+            <strong>{directory.settings.name}</strong>
             <span>Team workspace</span>
           </div>
           <span className="workspace-yellow-dot" />
         </div>
         <div className="sidebar-label">WORKSPACE</div>
         <nav className="sidebar-nav">
-          {navItems.map((item) => (
+          {visibleNav.map((item) => (
             <button
               key={item.id}
               className={page === item.id ? "active" : ""}
@@ -234,10 +298,10 @@ export function WorkspaceHome({ today }: { today: string }) {
           ))}
         </nav>
         <div className="sidebar-label team-label">
-          YOUR TEAM <span>{TEAM.length}</span>
+          YOUR TEAM <span>{members.length}</span>
         </div>
         <div className="sidebar-team">
-          {TEAM.map((person) => (
+          {members.map((person) => (
             <div key={person.id}>
               <Avatar id={person.id} small />
               <span>{person.name}</span>
@@ -248,17 +312,37 @@ export function WorkspaceHome({ today }: { today: string }) {
         <div className="sidebar-bottom">
           <div className="preview-note">
             <Sparkles size={18} />
-            <strong>A preview of what’s next</strong>
+            <strong>
+              {access?.mode === "authenticated"
+                ? "Workspace prototype"
+                : "A preview of what’s next"}
+            </strong>
             <p>Explore with sample tasks. Changes stay in this browser.</p>
             <span className="preview-note-tag">PREVIEW WORKSPACE</span>
           </div>
-          <Link className="sidebar-signin" href="/sign-in">
+          {!routed && (
+            <Link href="/dashboard" className="workspace-open-link">
+              Open full workspace <ArrowUpRight size={14} />
+            </Link>
+          )}
+          <Link
+            className="sidebar-signin"
+            href={access?.mode === "authenticated" ? "/settings" : "/sign-in"}
+          >
             <span className="signin-avatar">
               <Users size={18} />
             </span>
             <span>
-              <strong>Your team, together</strong>
-              <small>Sign in to your account</small>
+              <strong>
+                {access?.mode === "authenticated"
+                  ? access.name
+                  : "Your team, together"}
+              </strong>
+              <small>
+                {access?.mode === "authenticated"
+                  ? "Account preferences"
+                  : "Sign in to your account"}
+              </small>
             </span>
             <LogIn size={17} />
           </Link>
@@ -279,24 +363,42 @@ export function WorkspaceHome({ today }: { today: string }) {
             Workspace <ChevronRight size={14} />
             <span>{pageTitle}</span>
           </div>
-          <label className="global-search">
-            <Search size={17} />
-            <input
-              ref={searchRef}
-              aria-label="Search tasks"
-              placeholder="Search anything…"
-              value={query}
-              onChange={(event) => setQuery(event.target.value)}
-            />
-            <kbd>Ctrl K</kbd>
-          </label>
+          {isTaskPage && (
+            <label className="global-search">
+              <Search size={17} />
+              <input
+                ref={searchRef}
+                aria-label="Search tasks"
+                placeholder="Search anything…"
+                value={query}
+                onChange={(event) => setQuery(event.target.value)}
+              />
+              <kbd>Ctrl K</kbd>
+            </label>
+          )}
           <span className="preview-indicator">
             <span />
             Preview
           </span>
-          <Link className="topbar-signin" href="/sign-in">
-            Sign in <ArrowUpRight size={15} />
-          </Link>
+          <button
+            className="workspace-theme-button"
+            onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
+            aria-label={
+              theme === "dark" ? "Switch to light mode" : "Switch to dark mode"
+            }
+          >
+            {theme === "dark" ? <Sun size={17} /> : <Moon size={17} />}
+          </button>
+          {access?.mode === "authenticated" ? (
+            <div className="workspace-signed-in">
+              <span>{access.name}</span>
+              <SignOutButton />
+            </div>
+          ) : (
+            <Link className="topbar-signin" href="/sign-in">
+              Sign In <ArrowUpRight size={15} />
+            </Link>
+          )}
         </header>
 
         <main className="workspace-content" id="main-content">
@@ -315,13 +417,21 @@ export function WorkspaceHome({ today }: { today: string }) {
                     ? "Make time for the work that matters."
                     : page === "reports"
                       ? "A daily view of what’s on everyone’s plate."
-                      : "Everything your team is working toward, in one place."}
+                      : page === "team"
+                        ? "The people behind your team’s progress."
+                        : page === "settings"
+                          ? "Make the workspace feel right for you."
+                          : page === "admin"
+                            ? "Keep the people, projects, and workspace in order."
+                            : "Everything your team is working toward, in one place."}
               </p>
             </div>
-            <button className="primary-button" onClick={() => openNew()}>
-              <Plus size={18} />
-              New task
-            </button>
+            {isTaskPage && (
+              <button className="primary-button" onClick={() => openNew()}>
+                <Plus size={18} />
+                New task
+              </button>
+            )}
           </div>
           {notice && (
             <div role="alert" className="workspace-notice">
@@ -404,159 +514,296 @@ export function WorkspaceHome({ today }: { today: string }) {
             </>
           )}
 
-          <section
-            className="tasks-section"
-            aria-label={
-              page === "reports" ? "Daily task report" : "Task workspace"
-            }
-          >
-            <div className="section-heading">
-              <div>
-                <h2>
-                  {page === "overview"
-                    ? "Team tasks"
-                    : page === "reports"
-                      ? "Team daily report"
-                      : page === "calendar"
-                        ? "Team calendar"
-                        : "All tasks"}
-                  <span className="section-count">{visibleCount}</span>
-                </h2>
-                {page === "overview" && <p>Small steps. Shared progress.</p>}
-              </div>
-              {page !== "reports" && page !== "calendar" && (
-                <div className="view-tabs" role="group" aria-label="Task view">
-                  {(
-                    [
-                      { id: "board", label: "Board", icon: LayoutGrid },
-                      { id: "table", label: "Table", icon: Table2 },
-                      { id: "calendar", label: "Calendar", icon: CalendarDays },
-                    ] as const
-                  ).map((tab) => (
-                    <button
-                      key={tab.id}
-                      aria-pressed={view === tab.id}
-                      className={view === tab.id ? "active" : ""}
-                      onClick={() => setView(tab.id)}
-                    >
-                      <tab.icon size={15} />
-                      {tab.label}
-                    </button>
-                  ))}
+          {!isTaskPage && children}
+          {isTaskPage && (
+            <section
+              className="tasks-section"
+              aria-label={
+                page === "reports" ? "Daily task report" : "Task workspace"
+              }
+            >
+              <div className="section-heading">
+                <div>
+                  <h2>
+                    {page === "overview"
+                      ? "Team tasks"
+                      : page === "reports"
+                        ? "Team daily report"
+                        : page === "calendar"
+                          ? "Team calendar"
+                          : "All tasks"}
+                    <span className="section-count">{visibleCount}</span>
+                  </h2>
+                  {page === "overview" && <p>Small steps. Shared progress.</p>}
                 </div>
-              )}
-            </div>
-            <div className="task-toolbar">
-              <div className="filter-group">
-                <label className="filter-select">
-                  <Users size={15} />
-                  <select
-                    aria-label="Filter by team member"
-                    value={assignee}
-                    onChange={(event) => setAssignee(event.target.value)}
+                {page !== "reports" && page !== "calendar" && (
+                  <div
+                    className="view-tabs"
+                    role="group"
+                    aria-label="Task view"
                   >
-                    <option value="all">All team members</option>
-                    {TEAM.map((person) => (
-                      <option key={person.id} value={person.id}>
-                        {person.name}
-                      </option>
+                    {(
+                      [
+                        { id: "board", label: "Board", icon: LayoutGrid },
+                        { id: "table", label: "Table", icon: Table2 },
+                        {
+                          id: "calendar",
+                          label: "Calendar",
+                          icon: CalendarDays,
+                        },
+                      ] as const
+                    ).map((tab) => (
+                      <button
+                        key={tab.id}
+                        aria-pressed={view === tab.id}
+                        className={view === tab.id ? "active" : ""}
+                        onClick={() => setView(tab.id)}
+                      >
+                        <tab.icon size={15} />
+                        {tab.label}
+                      </button>
                     ))}
-                  </select>
-                </label>
-                <label className="filter-select">
-                  <SlidersHorizontal size={15} />
-                  <select
-                    aria-label="Filter by status"
-                    value={status}
-                    onChange={(event) => setStatus(event.target.value)}
-                  >
-                    <option value="all">All statuses</option>
-                    {STATUSES.map((item) => (
-                      <option key={item}>{item}</option>
-                    ))}
-                  </select>
-                </label>
-                {(query || assignee !== "all" || status !== "all") && (
-                  <button
-                    className="clear-filters"
-                    onClick={() => {
-                      setQuery("");
-                      setAssignee("all");
-                      setStatus("all");
-                    }}
-                  >
-                    Clear filters <X size={12} />
-                  </button>
+                  </div>
                 )}
               </div>
-              <span className="toolbar-hint">
-                {page === "reports"
-                  ? "Tasks scheduled for the selected day"
-                  : view === "board" && page !== "calendar"
-                    ? "Drag a task to update its status"
-                    : `${filtered.length} tasks in view`}
-              </span>
-            </div>
-
-            {page === "reports" ? (
-              <div className="daily-report">
-                <div className="report-date">
-                  <label htmlFor="report-date">
-                    <CalendarDays size={18} />
-                    Report date
+              <div className="task-toolbar">
+                <div className="filter-group">
+                  <label className="filter-select">
+                    <Users size={15} />
+                    <select
+                      aria-label="Filter by team member"
+                      value={assignee}
+                      onChange={(event) => setAssignee(event.target.value)}
+                    >
+                      <option value="all">All team members</option>
+                      {members.map((person) => (
+                        <option key={person.id} value={person.id}>
+                          {person.name}
+                        </option>
+                      ))}
+                    </select>
                   </label>
-                  <input
-                    id="report-date"
-                    type="date"
-                    value={reportDate}
-                    onChange={(event) => {
-                      if (event.target.value) setReportDate(event.target.value);
-                    }}
-                  />
+                  <label className="filter-select">
+                    <SlidersHorizontal size={15} />
+                    <select
+                      aria-label="Filter by status"
+                      value={status}
+                      onChange={(event) => setStatus(event.target.value)}
+                    >
+                      <option value="all">All statuses</option>
+                      {STATUSES.map((item) => (
+                        <option key={item}>{item}</option>
+                      ))}
+                    </select>
+                  </label>
+                  {(query || assignee !== "all" || status !== "all") && (
+                    <button
+                      className="clear-filters"
+                      onClick={() => {
+                        setQuery("");
+                        setAssignee("all");
+                        setStatus("all");
+                      }}
+                    >
+                      Clear filters <X size={12} />
+                    </button>
+                  )}
                 </div>
-                <div className="report-grid">
-                  {TEAM.filter(
-                    (person) => assignee === "all" || person.id === assignee,
-                  ).map((person) => {
-                    const personTasks = filtered
+                <span className="toolbar-hint">
+                  {page === "reports"
+                    ? "Tasks scheduled for the selected day"
+                    : view === "board" && page !== "calendar"
+                      ? "Drag a task to update its status"
+                      : `${filtered.length} tasks in view`}
+                </span>
+              </div>
+
+              {page === "reports" ? (
+                <div className="daily-report">
+                  <div className="report-date">
+                    <label htmlFor="report-date">
+                      <CalendarDays size={18} />
+                      Report date
+                    </label>
+                    <input
+                      id="report-date"
+                      type="date"
+                      value={reportDate}
+                      onChange={(event) => {
+                        if (event.target.value)
+                          setReportDate(event.target.value);
+                      }}
+                    />
+                  </div>
+                  <div className="report-grid">
+                    {members
                       .filter(
-                        (task) =>
-                          task.assignee === person.id &&
-                          task.date === reportDate,
+                        (person) =>
+                          assignee === "all" || person.id === assignee,
                       )
-                      .sort((a, b) => a.time.localeCompare(b.time));
-                    return (
-                      <article className="person-report" key={person.id}>
-                        <header>
-                          <Avatar id={person.id} />
-                          <div>
-                            <h3>{person.name}</h3>
-                            <p>{person.role}</p>
-                          </div>
-                          <span className="section-count">
-                            {personTasks.length}
-                          </span>
-                        </header>
-                        <div className="report-statuses">
-                          {STATUSES.map((item) => (
-                            <span key={item} className={statusClass(item)}>
-                              <i />
-                              {
-                                personTasks.filter(
-                                  (task) => task.status === item,
-                                ).length
-                              }{" "}
-                              {item}
-                            </span>
-                          ))}
+                      .map((person) => {
+                        const personTasks = filtered
+                          .filter(
+                            (task) =>
+                              task.assignee === person.id &&
+                              task.date === reportDate,
+                          )
+                          .sort((a, b) => a.time.localeCompare(b.time));
+                        return (
+                          <article className="person-report" key={person.id}>
+                            <header>
+                              <Avatar id={person.id} />
+                              <div>
+                                <h3>{person.name}</h3>
+                                <p>{person.role}</p>
+                              </div>
+                              <span className="section-count">
+                                {personTasks.length}
+                              </span>
+                            </header>
+                            <div className="report-statuses">
+                              {STATUSES.map((item) => (
+                                <span key={item} className={statusClass(item)}>
+                                  <i />
+                                  {
+                                    personTasks.filter(
+                                      (task) => task.status === item,
+                                    ).length
+                                  }{" "}
+                                  {item}
+                                </span>
+                              ))}
+                            </div>
+                            {personTasks.length ? (
+                              personTasks.map((task) => (
+                                <button
+                                  className="report-task"
+                                  key={task.id}
+                                  onClick={() => setEditing(task)}
+                                >
+                                  <span
+                                    className={`task-check ${statusClass(task.status)}`}
+                                  >
+                                    {task.status === "Done" && (
+                                      <Check size={12} />
+                                    )}
+                                  </span>
+                                  <span>
+                                    <strong>{task.title}</strong>
+                                    <small>
+                                      {task.time || "All day"} · {task.project}
+                                    </small>
+                                  </span>
+                                  <ChevronRight size={15} />
+                                </button>
+                              ))
+                            ) : (
+                              <p className="empty-copy">
+                                No tasks scheduled for this day.
+                              </p>
+                            )}
+                          </article>
+                        );
+                      })}
+                  </div>
+                </div>
+              ) : page === "calendar" || view === "calendar" ? (
+                <div className="calendar-view">
+                  <div className="calendar-toolbar">
+                    <h3>
+                      {new Intl.DateTimeFormat("en", {
+                        month: "long",
+                        year: "numeric",
+                      }).format(new Date(month + "T12:00:00"))}
+                    </h3>
+                    <div>
+                      <button
+                        className="secondary-button"
+                        onClick={() => setMonth(today.slice(0, 7) + "-01")}
+                      >
+                        Today
+                      </button>
+                      <button
+                        className="icon-button"
+                        aria-label="Previous month"
+                        onClick={() => shiftMonth(-1)}
+                      >
+                        <ChevronLeft size={18} />
+                      </button>
+                      <button
+                        className="icon-button"
+                        aria-label="Next month"
+                        onClick={() => shiftMonth(1)}
+                      >
+                        <ChevronRight size={18} />
+                      </button>
+                    </div>
+                  </div>
+                  <div className="calendar-scroll">
+                    <div className="calendar-grid">
+                      {(directory.settings.weekStartsOn === "Monday"
+                        ? ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
+                        : ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"]
+                      ).map((day) => (
+                        <div className="calendar-weekday" key={day}>
+                          {day}
                         </div>
-                        {personTasks.length ? (
-                          personTasks.map((task) => (
-                            <button
-                              className="report-task"
-                              key={task.id}
-                              onClick={() => setEditing(task)}
-                            >
+                      ))}
+                      {calendarDays(
+                        month,
+                        directory.settings.weekStartsOn === "Monday",
+                      ).map((day) => (
+                        <div
+                          key={day.date}
+                          className={`calendar-day ${day.outside ? "outside" : ""} ${day.date === today ? "is-today" : ""}`}
+                        >
+                          <button
+                            className="calendar-date"
+                            aria-label={`View report for ${day.date}`}
+                            onClick={() => {
+                              setReportDate(day.date);
+                              navigate("reports");
+                            }}
+                          >
+                            {day.day}
+                          </button>
+                          {filtered
+                            .filter((task) => task.date === day.date)
+                            .map((task) => (
+                              <button
+                                key={task.id}
+                                className={`calendar-event ${statusClass(task.status)}`}
+                                onClick={() => setEditing(task)}
+                                title={task.title}
+                              >
+                                <span>{task.time}</span>
+                                {task.title}
+                              </button>
+                            ))}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              ) : view === "table" ? (
+                <div className="task-table-scroll">
+                  <table className="task-table">
+                    <thead>
+                      <tr>
+                        <th>Task name</th>
+                        <th>Assignee</th>
+                        <th>Status</th>
+                        <th>Priority</th>
+                        <th>
+                          Scheduled date <ArrowDown size={12} />
+                        </th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {filtered.map((task) => (
+                        <tr key={task.id}>
+                          <td>
+                            <button onClick={() => setEditing(task)}>
                               <span
                                 className={`task-check ${statusClass(task.status)}`}
                               >
@@ -564,298 +811,186 @@ export function WorkspaceHome({ today }: { today: string }) {
                               </span>
                               <span>
                                 <strong>{task.title}</strong>
-                                <small>
-                                  {task.time || "All day"} · {task.project}
-                                </small>
+                                <small>{task.project}</small>
                               </span>
-                              <ChevronRight size={15} />
                             </button>
-                          ))
-                        ) : (
-                          <p className="empty-copy">
-                            No tasks scheduled for this day.
-                          </p>
-                        )}
-                      </article>
+                          </td>
+                          <td>
+                            <div className="table-assignee">
+                              <Avatar id={task.assignee} small />
+                              {
+                                members.find(
+                                  (person) => person.id === task.assignee,
+                                )?.name
+                              }
+                            </div>
+                          </td>
+                          <td>
+                            <StatusBadge status={task.status} />
+                          </td>
+                          <td>
+                            <span
+                              className={`priority priority-${task.priority.toLowerCase()}`}
+                            >
+                              <Flag size={12} />
+                              {task.priority}
+                            </span>
+                          </td>
+                          <td>{displayDate(task.date, today)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                  {!filtered.length && (
+                    <div className="empty-state">
+                      <Search size={24} />
+                      <h3>No matching tasks</h3>
+                      <p>Try a different search or clear your filters.</p>
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <div className="task-board">
+                  {STATUSES.map((column) => {
+                    const columnTasks = filtered.filter(
+                      (task) => task.status === column,
+                    );
+                    const Icon = STATUS_ICONS[column];
+                    return (
+                      <div
+                        key={column}
+                        className={`board-column column-${statusClass(column)} ${dropTarget === column ? "drag-over" : ""}`}
+                        onDragOver={(event) => {
+                          event.preventDefault();
+                          setDropTarget(column);
+                        }}
+                        onDragLeave={(event) => {
+                          if (
+                            !event.currentTarget.contains(
+                              event.relatedTarget as Node | null,
+                            )
+                          )
+                            setDropTarget(null);
+                        }}
+                        onDrop={(event) => {
+                          event.preventDefault();
+                          const id = event.dataTransfer.getData("text/plain");
+                          if (tasks.some((task) => task.id === id))
+                            changeStatus(id, column);
+                          setDropTarget(null);
+                        }}
+                      >
+                        <div className="column-heading">
+                          <Icon size={15} />
+                          <h3>{column}</h3>
+                          <span>{columnTasks.length}</span>
+                          <button
+                            className="icon-button"
+                            aria-label={`Add task to ${column}`}
+                            onClick={() => openNew(column)}
+                          >
+                            <Plus size={16} />
+                          </button>
+                        </div>
+                        <div className="column-cards">
+                          {columnTasks.map((task) => (
+                            <article
+                              key={task.id}
+                              className="task-card"
+                              draggable
+                              onDragStart={(event) => {
+                                event.dataTransfer.setData(
+                                  "text/plain",
+                                  task.id,
+                                );
+                                event.dataTransfer.effectAllowed = "move";
+                              }}
+                              onDragEnd={() => setDropTarget(null)}
+                            >
+                              <div className="task-card-top">
+                                <span
+                                  className={`project-tag project-${task.project === "Engineering" ? "blue" : task.project === "Operations" ? "purple" : "teal"}`}
+                                >
+                                  {task.project}
+                                </span>
+                                <button
+                                  className="card-menu"
+                                  aria-label={`Edit ${task.title}`}
+                                  onClick={() => setEditing(task)}
+                                >
+                                  <MoreHorizontal size={18} />
+                                </button>
+                              </div>
+                              <button
+                                className={`task-title ${task.status === "Done" ? "is-completed" : ""}`}
+                                onClick={() => setEditing(task)}
+                              >
+                                {task.title}
+                              </button>
+                              <p className="task-description">
+                                {task.description}
+                              </p>
+                              <div className="task-card-meta">
+                                <span
+                                  className={`priority priority-${task.priority.toLowerCase()}`}
+                                >
+                                  <Flag size={11} />
+                                  {task.priority}
+                                </span>
+                                <label
+                                  className="card-status-control"
+                                  title="Change task status"
+                                >
+                                  <GripVertical size={13} />
+                                  <select
+                                    aria-label={`Status for ${task.title}`}
+                                    value={task.status}
+                                    onChange={(event) =>
+                                      changeStatus(
+                                        task.id,
+                                        event.target.value as Status,
+                                      )
+                                    }
+                                  >
+                                    {STATUSES.map((item) => (
+                                      <option key={item}>{item}</option>
+                                    ))}
+                                  </select>
+                                </label>
+                              </div>
+                              <footer>
+                                <span
+                                  className={`task-date ${task.date === today && task.status !== "Done" ? "due-today" : ""}`}
+                                >
+                                  <CalendarDays size={12} />
+                                  {displayDate(task.date, today)}
+                                </span>
+                                <Avatar id={task.assignee} small />
+                              </footer>
+                            </article>
+                          ))}
+                          {!columnTasks.length && (
+                            <div className="empty-column">
+                              {query || assignee !== "all" || status !== "all"
+                                ? "No matching tasks"
+                                : "A little breathing room."}
+                            </div>
+                          )}
+                          <button
+                            className="add-column-task"
+                            onClick={() => openNew(column)}
+                          >
+                            <Plus size={15} />
+                            Add task
+                          </button>
+                        </div>
+                      </div>
                     );
                   })}
                 </div>
-              </div>
-            ) : page === "calendar" || view === "calendar" ? (
-              <div className="calendar-view">
-                <div className="calendar-toolbar">
-                  <h3>
-                    {new Intl.DateTimeFormat("en", {
-                      month: "long",
-                      year: "numeric",
-                    }).format(new Date(month + "T12:00:00"))}
-                  </h3>
-                  <div>
-                    <button
-                      className="secondary-button"
-                      onClick={() => setMonth(today.slice(0, 7) + "-01")}
-                    >
-                      Today
-                    </button>
-                    <button
-                      className="icon-button"
-                      aria-label="Previous month"
-                      onClick={() => shiftMonth(-1)}
-                    >
-                      <ChevronLeft size={18} />
-                    </button>
-                    <button
-                      className="icon-button"
-                      aria-label="Next month"
-                      onClick={() => shiftMonth(1)}
-                    >
-                      <ChevronRight size={18} />
-                    </button>
-                  </div>
-                </div>
-                <div className="calendar-scroll">
-                  <div className="calendar-grid">
-                    {["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].map(
-                      (day) => (
-                        <div className="calendar-weekday" key={day}>
-                          {day}
-                        </div>
-                      ),
-                    )}
-                    {calendarDays(month).map((day) => (
-                      <div
-                        key={day.date}
-                        className={`calendar-day ${day.outside ? "outside" : ""} ${day.date === today ? "is-today" : ""}`}
-                      >
-                        <button
-                          className="calendar-date"
-                          aria-label={`View report for ${day.date}`}
-                          onClick={() => {
-                            setReportDate(day.date);
-                            navigate("reports");
-                          }}
-                        >
-                          {day.day}
-                        </button>
-                        {filtered
-                          .filter((task) => task.date === day.date)
-                          .map((task) => (
-                            <button
-                              key={task.id}
-                              className={`calendar-event ${statusClass(task.status)}`}
-                              onClick={() => setEditing(task)}
-                              title={task.title}
-                            >
-                              <span>{task.time}</span>
-                              {task.title}
-                            </button>
-                          ))}
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              </div>
-            ) : view === "table" ? (
-              <div className="task-table-scroll">
-                <table className="task-table">
-                  <thead>
-                    <tr>
-                      <th>Task name</th>
-                      <th>Assignee</th>
-                      <th>Status</th>
-                      <th>Priority</th>
-                      <th>
-                        Scheduled date <ArrowDown size={12} />
-                      </th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {filtered.map((task) => (
-                      <tr key={task.id}>
-                        <td>
-                          <button onClick={() => setEditing(task)}>
-                            <span
-                              className={`task-check ${statusClass(task.status)}`}
-                            >
-                              {task.status === "Done" && <Check size={12} />}
-                            </span>
-                            <span>
-                              <strong>{task.title}</strong>
-                              <small>{task.project}</small>
-                            </span>
-                          </button>
-                        </td>
-                        <td>
-                          <div className="table-assignee">
-                            <Avatar id={task.assignee} small />
-                            {
-                              TEAM.find((person) => person.id === task.assignee)
-                                ?.name
-                            }
-                          </div>
-                        </td>
-                        <td>
-                          <StatusBadge status={task.status} />
-                        </td>
-                        <td>
-                          <span
-                            className={`priority priority-${task.priority.toLowerCase()}`}
-                          >
-                            <Flag size={12} />
-                            {task.priority}
-                          </span>
-                        </td>
-                        <td>{displayDate(task.date, today)}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-                {!filtered.length && (
-                  <div className="empty-state">
-                    <Search size={24} />
-                    <h3>No matching tasks</h3>
-                    <p>Try a different search or clear your filters.</p>
-                  </div>
-                )}
-              </div>
-            ) : (
-              <div className="task-board">
-                {STATUSES.map((column) => {
-                  const columnTasks = filtered.filter(
-                    (task) => task.status === column,
-                  );
-                  const Icon = STATUS_ICONS[column];
-                  return (
-                    <div
-                      key={column}
-                      className={`board-column column-${statusClass(column)} ${dropTarget === column ? "drag-over" : ""}`}
-                      onDragOver={(event) => {
-                        event.preventDefault();
-                        setDropTarget(column);
-                      }}
-                      onDragLeave={(event) => {
-                        if (
-                          !event.currentTarget.contains(
-                            event.relatedTarget as Node | null,
-                          )
-                        )
-                          setDropTarget(null);
-                      }}
-                      onDrop={(event) => {
-                        event.preventDefault();
-                        const id = event.dataTransfer.getData("text/plain");
-                        if (tasks.some((task) => task.id === id))
-                          changeStatus(id, column);
-                        setDropTarget(null);
-                      }}
-                    >
-                      <div className="column-heading">
-                        <Icon size={15} />
-                        <h3>{column}</h3>
-                        <span>{columnTasks.length}</span>
-                        <button
-                          className="icon-button"
-                          aria-label={`Add task to ${column}`}
-                          onClick={() => openNew(column)}
-                        >
-                          <Plus size={16} />
-                        </button>
-                      </div>
-                      <div className="column-cards">
-                        {columnTasks.map((task) => (
-                          <article
-                            key={task.id}
-                            className="task-card"
-                            draggable
-                            onDragStart={(event) => {
-                              event.dataTransfer.setData("text/plain", task.id);
-                              event.dataTransfer.effectAllowed = "move";
-                            }}
-                            onDragEnd={() => setDropTarget(null)}
-                          >
-                            <div className="task-card-top">
-                              <span
-                                className={`project-tag project-${task.project === "Engineering" ? "blue" : task.project === "Operations" ? "purple" : "teal"}`}
-                              >
-                                {task.project}
-                              </span>
-                              <button
-                                className="card-menu"
-                                aria-label={`Edit ${task.title}`}
-                                onClick={() => setEditing(task)}
-                              >
-                                <MoreHorizontal size={18} />
-                              </button>
-                            </div>
-                            <button
-                              className={`task-title ${task.status === "Done" ? "is-completed" : ""}`}
-                              onClick={() => setEditing(task)}
-                            >
-                              {task.title}
-                            </button>
-                            <p className="task-description">
-                              {task.description}
-                            </p>
-                            <div className="task-card-meta">
-                              <span
-                                className={`priority priority-${task.priority.toLowerCase()}`}
-                              >
-                                <Flag size={11} />
-                                {task.priority}
-                              </span>
-                              <label
-                                className="card-status-control"
-                                title="Change task status"
-                              >
-                                <GripVertical size={13} />
-                                <select
-                                  aria-label={`Status for ${task.title}`}
-                                  value={task.status}
-                                  onChange={(event) =>
-                                    changeStatus(
-                                      task.id,
-                                      event.target.value as Status,
-                                    )
-                                  }
-                                >
-                                  {STATUSES.map((item) => (
-                                    <option key={item}>{item}</option>
-                                  ))}
-                                </select>
-                              </label>
-                            </div>
-                            <footer>
-                              <span
-                                className={`task-date ${task.date === today && task.status !== "Done" ? "due-today" : ""}`}
-                              >
-                                <CalendarDays size={12} />
-                                {displayDate(task.date, today)}
-                              </span>
-                              <Avatar id={task.assignee} small />
-                            </footer>
-                          </article>
-                        ))}
-                        {!columnTasks.length && (
-                          <div className="empty-column">
-                            {query || assignee !== "all" || status !== "all"
-                              ? "No matching tasks"
-                              : "A little breathing room."}
-                          </div>
-                        )}
-                        <button
-                          className="add-column-task"
-                          onClick={() => openNew(column)}
-                        >
-                          <Plus size={15} />
-                          Add task
-                        </button>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-          </section>
+              )}
+            </section>
+          )}
 
           {page === "overview" && (
             <section className="overview-bottom">
@@ -888,8 +1023,9 @@ export function WorkspaceHome({ today }: { today: string }) {
                         <strong>{task.title}</strong>
                         <small>
                           {
-                            TEAM.find((person) => person.id === task.assignee)
-                              ?.name
+                            members.find(
+                              (person) => person.id === task.assignee,
+                            )?.name
                           }
                         </small>
                       </span>
@@ -910,7 +1046,7 @@ export function WorkspaceHome({ today }: { today: string }) {
                   </div>
                   <Users size={20} />
                 </div>
-                {TEAM.map((person) => {
+                {members.map((person) => {
                   const assigned = tasks.filter(
                     (task) => task.assignee === person.id,
                   );
@@ -988,6 +1124,13 @@ function TaskDialog({
   onClose: () => void;
   onSave: (task: Task) => void;
 }) {
+  const { directory } = useWorkspaceData();
+  const members = directory.members.filter(
+    (member) => member.active || member.id === task?.assignee,
+  );
+  const projects = directory.projects.filter(
+    (project) => !project.archived || project.name === task?.project,
+  );
   const dialog = useRef<HTMLDialogElement>(null);
   useEffect(() => {
     const element = dialog.current;
@@ -1005,7 +1148,7 @@ function TaskDialog({
       return;
     }
     onSave({
-      id: task?.id ?? crypto.randomUUID(),
+      id: task?.id ?? localId(),
       title,
       description: String(form.get("description") ?? "").trim(),
       status: form.get("status") as Status,
@@ -1067,8 +1210,11 @@ function TaskDialog({
         <div className="form-row">
           <label>
             Assignee
-            <select name="assignee" defaultValue={task?.assignee ?? TEAM[0].id}>
-              {TEAM.map((person) => (
+            <select
+              name="assignee"
+              defaultValue={task?.assignee ?? members[0].id}
+            >
+              {members.map((person) => (
                 <option key={person.id} value={person.id}>
                   {person.name}
                 </option>
@@ -1079,10 +1225,12 @@ function TaskDialog({
             Project
             <select
               name="project"
-              defaultValue={task?.project ?? "Engineering"}
+              defaultValue={task?.project ?? projects[0]?.name ?? ""}
             >
-              {["Engineering", "Operations", "Site works"].map((project) => (
-                <option key={project}>{project}</option>
+              {projects.map((project) => (
+                <option key={project.id} value={project.name}>
+                  {project.name}
+                </option>
               ))}
             </select>
           </label>

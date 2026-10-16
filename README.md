@@ -12,6 +12,31 @@ The public page has a blue-tinted sticky navigation bar that keeps its color whi
 
 The preview includes board, table, and monthly calendar views; task creation and editing; status changes by dropdown or drag; search and filters; and a daily report of tasks scheduled per user. Sample tasks and team members are illustrative. Edits are saved only in browser local storage and are separate from authenticated company records. Daily reports show the current status of scheduled tasks; historical activity reporting will require the database workflow.
 
+## Workspace and administration prototype
+
+The workspace has real page routes and a shared sidebar:
+
+| Route | Page |
+| --- | --- |
+| `/dashboard` | Task summary, board, daily agenda, and team progress |
+| `/tasks` | Task board and table, search, filters, creation, and editing |
+| `/calendar` | Monthly calendar and date links to reports |
+| `/reports` | Tasks scheduled per date and team member |
+| `/team` | Searchable sample directory with task counts |
+| `/settings` | Shared light/dark appearance preferences |
+| `/admin` | Administration summary |
+| `/admin/users` | Sample members, demo roles, activation, and duplicate protection |
+| `/admin/projects` | Sample projects, descriptions, archiving, and restoration |
+| `/admin/settings` | Workspace name, description, and calendar week start |
+
+With authentication unconfigured, these pages are explicitly labeled as a browser-local prototype. No real accounts, invitations, or server permissions are changed. Sample members and projects are available in task forms; deactivation and archiving preserve existing task references. At least one active demo administrator and project must remain.
+
+Once authentication is configured, every workspace page validates the server session. Admin routes additionally require the signed-in Better Auth user ID to be listed in the server-only `ADMIN_USER_IDS` environment variable (comma-separated). An empty allowlist grants nobody actual admin access. Editing a browser-local demo role never grants real administrator access. Restart after changing the allowlist.
+
+Task and directory storage is still local to the browser even when a user is signed in. Shared database task storage, actual user management, invitations, and a complete task permission model remain future work.
+
+Sign-in and sign-up share the home page's branding, gradient palette, and saved light/dark preference. Password visibility and existing validation are preserved. Database and Google OAuth configuration are still required for real sign-in.
+
 ## Local configuration
 
 Node 24 and pnpm are used by this project. A git-ignored `.env` has been prepared locally with generated authentication and local database secrets. `.env.example` documents the variables without secrets.
@@ -86,14 +111,14 @@ Reference: https://better-auth.com/docs/authentication/google
 ## Current authentication behavior
 
 - `/sign-in` and `/sign-up`: email/password forms and Google sign-in.
-- `/dashboard`: server-validated session required; anonymous users go to sign-in.
+- Workspace routes: browser-local prototype before authentication setup; server-validated session required after setup.
 - `/`: public product presentation page.
 - `/preview`: browser-local sample workspace, separate from the authenticated dashboard.
 - `/api/auth/*`: Better Auth endpoints; return 503 until environment configuration is present.
 - Passwords require 12-128 characters; Better Auth hashes them.
 - Sessions expire after seven days and refresh after one day of activity.
 - Rate limits persist in PostgreSQL, including five email login attempts per minute.
-- Signup is public. Roles, invitations, email verification, and password reset emails are not implemented yet.
+- Signup is public. Demo roles exist in the admin prototype; real admin page access uses `ADMIN_USER_IDS`. Invitations, email verification, and password reset emails are not implemented yet.
 - Automatic account linking is disabled until email verification is implemented. Use the original login method for an existing email address; choosing another method does not automatically merge accounts.
 - Call `requireSession()` inside future protected pages, server actions, and data access functions. Future API endpoints must validate sessions and enforce task/user permissions separately. Hiding UI is not authorization.
 - Session data is not placed in a shared application cache.
